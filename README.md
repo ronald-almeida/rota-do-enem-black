@@ -14,6 +14,8 @@ Abra `http://127.0.0.1:4173`. Nesse modo os pagamentos são simulados e identifi
 
 Rotas: `/`, `/checkout`, `/pagamento`, `/obrigado`, `/termos`, `/privacidade`.
 
+Nos deployments de Preview e na revisão local, `/api/review-thanks` abre uma prévia visual identificada da página de obrigado e permite revisar o PDF sem pagar. Essa rota e `/api/review-pdf` retornam 404 em produção. A prévia visual não aprova pedidos nem habilita simulações de cobrança na Vercel.
+
 ## Configuração Vercel
 
 Projeto existente: `rota-do-enem-black`, equipe `team_dZlw0XSD1Tl5Z4gE3kUxXVS6`.

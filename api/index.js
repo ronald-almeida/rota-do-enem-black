@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { configured, reviewMode, createCharge, getCharge, simulatePayment, CheckoutError, PRICE, PRODUCT, WHATSAPP, REFUND_URL } from '../lib/checkout.js';
+import { configured, reviewMode, visualReview, createCharge, getCharge, simulatePayment, CheckoutError, PRICE, PRODUCT, WHATSAPP, REFUND_URL } from '../lib/checkout.js';
 
 async function readBody(req) {
   if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) return req.body;
@@ -22,6 +22,16 @@ export default async function handler(req, res) {
   const json = (status, body) => { res.statusCode = status; res.setHeader('Content-Type', 'application/json; charset=utf-8'); res.end(JSON.stringify(body)); };
   const route = new URL(req.url, 'http://localhost').pathname;
   try {
+    if (route === '/api/review-thanks' && req.method === 'GET') {
+      if (!visualReview()) throw new CheckoutError('Página não encontrada.', 404);
+      const html = (await readFile(new URL('../public/obrigado.html', import.meta.url), 'utf8')).replace('/thanks.js', '/review-thanks.js');
+      res.setHeader('Content-Type', 'text/html; charset=utf-8'); return res.end(html);
+    }
+    if (route === '/api/review-pdf' && req.method === 'GET') {
+      if (!visualReview()) throw new CheckoutError('Página não encontrada.', 404);
+      const pdf = await readFile(new URL('../private/introducao-rota-do-enem.pdf', import.meta.url));
+      res.setHeader('Content-Type', 'application/pdf');res.setHeader('Content-Disposition', 'attachment; filename="introducao-rota-do-enem.pdf"');return res.end(pdf);
+    }
     if (route === '/api/config' && req.method === 'GET') return json(200, { available: configured(), review: reviewMode(), price: PRICE, product: PRODUCT, whatsapp: WHATSAPP, refundUrl: REFUND_URL });
     if (route === '/api/intro' && req.method === 'GET') {
       const token = req.headers.authorization?.replace(/^Bearer /, '');

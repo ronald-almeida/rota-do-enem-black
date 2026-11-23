@@ -42,7 +42,7 @@ test('contrato Atlas: preço fixo, idempotência estável e consulta segura',asy
 });
 
 test('API bloqueia cobranças sem chave e simulação em Vercel',async()=>{
-  delete process.env.ATLAS_SECRET_KEY;process.env.LOCAL_REVIEW='1';process.env.VERCEL='1';assert.equal(reviewMode(),false);
+  delete process.env.ATLAS_SECRET_KEY;process.env.LOCAL_REVIEW='1';process.env.VERCEL='1';process.env.VERCEL_ENV='production';assert.equal(reviewMode(),false);
   const server=createServer(handler).listen(0,'127.0.0.1');await once(server,'listening');const base='http://127.0.0.1:'+server.address().port;
   try{
     const response=await fetch(base+'/api/config');assert.equal((await response.json()).available,false);
@@ -50,8 +50,10 @@ test('API bloqueia cobranças sem chave e simulação em Vercel',async()=>{
     assert.equal((await post('/api/checkout',input)).status,503);
     assert.equal((await post('/api/review/pay',{})).status,404);
     assert.equal((await fetch(base+'/api/intro')).status,401);
+    assert.equal((await fetch(base+'/api/review-thanks')).status,404);
+    assert.equal((await fetch(base+'/api/review-pdf')).status,404);
     assert.equal((await fetch(base+'/api/checkout',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://wrong.test'},body:JSON.stringify(input)})).status,403);
-  }finally{server.close();delete process.env.VERCEL;delete process.env.LOCAL_REVIEW;}
+  }finally{server.close();delete process.env.VERCEL;delete process.env.VERCEL_ENV;delete process.env.LOCAL_REVIEW;}
 });
 
 test('fluxo local completo: pendente, pago e PDF protegido',async()=>{
@@ -59,6 +61,7 @@ test('fluxo local completo: pendente, pago e PDF protegido',async()=>{
   const post=(path,data)=>fetch(base+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
   try{
     const created=await (await post('/api/checkout',input)).json();assert.equal(created.status,'pending');
+    const visual=await fetch(base+'/api/review-thanks');assert.equal(visual.status,200);assert.match(await visual.text(),/review-thanks.js/);
     const duplicate=await (await post('/api/checkout',input)).json();assert.equal(created.id,duplicate.id);
     assert.equal((await fetch(base+'/api/intro',{headers:{Authorization:'Bearer '+created.token}})).status,403);
     assert.equal((await post('/api/review/pay',{token:created.token})).status,200);
