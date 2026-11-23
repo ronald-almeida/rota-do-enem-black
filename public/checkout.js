@@ -3,8 +3,8 @@ let available = false;
 $('submit').disabled = true;
 api('/api/config').then(config=>{
   available=config.available;showReview(config);$('submit').disabled=!available;
-  if (!available) { $('availability').textContent='O pagamento está temporariamente indisponível. Você pode falar com nossa equipe pelo WhatsApp abaixo.';$('availability').hidden=false; }
-}).catch(()=>{ $('availability').textContent='Não foi possível carregar o pagamento. Recarregue a página ou fale com a equipe.';$('availability').hidden=false; });
+  if (!available) { $('availability').textContent='O pagamento está temporariamente indisponível. Tente novamente mais tarde.';$('availability').hidden=false; }
+}).catch(()=>{ $('availability').textContent='Não foi possível carregar o pagamento. Recarregue a página e tente novamente.';$('availability').hidden=false; });
 const digits = value => value.replace(/\D/g,'');
 $('document').addEventListener('input',event=>{event.target.value=digits(event.target.value).slice(0,11).replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d{1,2})$/,'$1-$2');});
 $('phone').addEventListener('input',event=>{const d=digits(event.target.value).slice(0,11);event.target.value=d.length>2 ? `(${d.slice(0,2)}) ${d.slice(2).replace(d.length>10?/(\d{5})(\d)/:/(\d{4})(\d)/,'$1-$2')}` : d;});
