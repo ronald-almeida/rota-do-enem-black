@@ -1,0 +1,20 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "node scripts/check.mjs",
+  "outputDirectory": "public",
+  "functions": { "api/index.js": { "maxDuration": 30, "includeFiles": "private/**" } },
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/index" },
+    { "source": "/checkout", "destination": "/checkout.html" },
+    { "source": "/pagamento", "destination": "/pagamento.html" },
+    { "source": "/obrigado", "destination": "/obrigado.html" },
+    { "source": "/privacidade", "destination": "/privacidade.html" },
+    { "source": "/termos", "destination": "/termos.html" }
+  ],
+  "headers": [{ "source": "/(.*)", "headers": [
+    { "key": "X-Content-Type-Options", "value": "nosniff" },
+    { "key": "X-Frame-Options", "value": "DENY" },
+    { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+    { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" }
+  ] }]
+}
