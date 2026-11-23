@@ -20,6 +20,10 @@ Nos deployments de Preview e na revisão local, `/api/review-thanks` abre uma pr
 
 Projeto existente: `rota-do-enem-black`, equipe `team_dZlw0XSD1Tl5Z4gE3kUxXVS6`.
 
+Repositório conectado: `ronald-almeida/rota-do-enem-black`. A integração nativa do GitHub com a Vercel publica automaticamente os commits da branch de produção `codex/rota-black-review`, que também é a branch padrão atual do repositório; outras branches geram previews. A conexão pode ser conferida em **Settings > Git**, e a branch em **Settings > Environments > Production**.
+
+Site de produção: https://rota-do-enem-black.vercel.app/.
+
 - Framework: Other. Node.js: 24.x.
 - Build: `node scripts/check.mjs`. Output: `public`.
 - `ATLAS_SECRET_KEY`: chave de API aprovada da Atlas; adicionar somente nas variáveis de ambiente Vercel. Não adicionar ao Git.
