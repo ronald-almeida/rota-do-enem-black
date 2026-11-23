@@ -26,5 +26,5 @@ $('checkout-form').addEventListener('submit',async event=>{
     body.requestId=attempt.id;
     const order=await api('/api/checkout',body);
     saveOrder(order);location.assign(order.status==='paid'?'/obrigado':'/pagamento');
-  } catch(error) { $('form-error').textContent=errorMessage(error);$('form-error').hidden=false;$('form-error').scrollIntoView({behavior:'smooth',block:'center'});$('submit').disabled=false;$('submit').textContent='Gerar Pix de R$ 397,00'; }
+  } catch(error) { if(error.retryWithNewAttempt)sessionStorage.removeItem('rota.attempt.v1');$('form-error').textContent=errorMessage(error);$('form-error').hidden=false;$('form-error').scrollIntoView({behavior:'smooth',block:'center'});$('submit').disabled=false;$('submit').textContent='Gerar Pix de R$ 397,00'; }
 });

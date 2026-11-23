@@ -54,6 +54,8 @@ export default async function handler(req, res) {
     return json(404, { error: 'Página não encontrada.' });
   } catch (error) {
     if (!(error instanceof CheckoutError)) console.error('checkout_internal_error', error.name);
-    return json(error.status || 500, { error: error instanceof CheckoutError ? error.message : 'Não foi possível concluir. Tente novamente ou fale com a equipe.' });
+    return json(error.status || 500, error instanceof CheckoutError
+      ? { error: error.message, code: error.code, reference: error.reference, retryWithNewAttempt: error.retryWithNewAttempt === true }
+      : { error: 'Não foi possível concluir. Tente novamente ou fale com a equipe.' });
   }
 }

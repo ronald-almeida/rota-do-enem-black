@@ -10,11 +10,11 @@ function countdown(){
 }
 function render(next){
   order={...order,...next};saveOrder(order);$('loading').hidden=true;
+  $('order-reference').textContent='Referência para atendimento: '+order.order;
   if(order.status==='paid'){stopped=true;location.replace('/obrigado');return;}
   if(terminal[order.status]){stopped=true;sessionStorage.removeItem('rota.attempt.v1');status(...terminal[order.status]);return;}
   if(!order.pix){status('Não foi possível carregar o Pix.','Fale com a equipe para consultar sua compra.');return;}
   $('pix-view').hidden=false;$('status-view').hidden=true;$('pix-code').value=order.pix.code;
-  $('order-reference').textContent='Pedido: '+order.order;
   if(order.pix.image){$('qr').src=order.pix.image;$('qr').hidden=false;$('qr-fallback').hidden=true;}else{$('qr-fallback').textContent=order.review?'SIMULAÇÃO · Este código não pode ser pago.':'Use o código Pix Copia e Cola abaixo.';}
   $('simulate').hidden=!order.review;countdown();
 }

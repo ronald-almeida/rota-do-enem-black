@@ -14,6 +14,8 @@ test('valida CPF, confirmação de e-mail, celular e ciência do prazo',()=>{
   assert.throws(()=>customerFrom({...input,emailConfirmation:'outro@example.com'}),/iguais/);
   assert.throws(()=>customerFrom({...input,accepted:false}),/prazo/);
   assert.throws(()=>customerFrom({...input,phone:'123'}),/celular/);
+  assert.throws(()=>customerFrom({...input,phone:'78999999999'}),/DDD não é válido/);
+  assert.equal(customerFrom({...input,phone:'75999999999'}).phone,'75999999999');
 });
 
 test('sessão adulterada e expirada é recusada',()=>{
@@ -39,6 +41,32 @@ test('contrato Atlas: preço fixo, idempotência estável e consulta segura',asy
     globalThis.fetch=async()=>new Response(JSON.stringify({...order,status:'paid',livemode:false}));await assert.rejects(getCharge(first.token),/validar/);
     globalThis.fetch=async()=>new Response('{}',{status:503});await assert.rejects(createCharge(input),/Não foi possível/);
   }finally{globalThis.fetch=original;}
+});
+
+test('falha definitiva na criação não vira pedido pagável e mantém diagnóstico sem dados pessoais',async()=>{
+  const originalFetch=globalThis.fetch,originalWarn=console.warn;
+  const warnings=[];console.warn=(...args)=>warnings.push(args.join(' '));
+  process.env.ATLAS_SECRET_KEY='test-key-no-live-requests';delete process.env.LOCAL_REVIEW;
+  let upstream=()=>new Response(JSON.stringify({...order,status:'failed',customer:{email:'privado@example.com',document:input.document}}),{headers:{'X-Request-ID':'req_failed_123'}});
+  globalThis.fetch=(url,options)=>String(url).startsWith('https://atlaspags.com/api/v1/')?upstream():originalFetch(url,options);
+  const server=createServer(handler).listen(0,'127.0.0.1');await once(server,'listening');const base='http://127.0.0.1:'+server.address().port;
+  const post=()=>originalFetch(base+'/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input)});
+  try{
+    const response=await post();const data=await response.json();
+    assert.equal(response.status,502);assert.equal(data.code,'PIX_CREATION_FAILED');assert.equal(data.reference,order.id);assert.equal(data.retryWithNewAttempt,true);
+    assert.equal('token' in data,false);assert.equal('pix' in data,false);
+    assert.equal((await getCharge(signOrder(order))).status,'failed');
+    assert.match(warnings.join('\n'),/req_failed_123/);assert.match(warnings.join('\n'),/create_charge/);
+    assert.doesNotMatch(warnings.join('\n'),/privado@example.com|52998224725|test-key-no-live-requests/);
+    upstream=()=>{throw new TypeError('Network failed');};
+    const uncertain=await post();const uncertainData=await uncertain.json();assert.equal(uncertain.status,503);assert.equal(uncertainData.retryWithNewAttempt,false);
+    upstream=()=>new Response(JSON.stringify({error:{code:'invalid_request',message:'Forma de pagamento indisponível.'}}),{status:400,headers:{'X-Request-ID':'req_unavailable_456'}});
+    const unavailable=await post();const unavailableData=await unavailable.json();assert.equal(unavailable.status,503);assert.equal(unavailableData.reference,'req_unavailable_456');assert.equal(unavailableData.retryWithNewAttempt,false);
+    assert.match(warnings.join('\n'),/payment_method_unavailable/);
+    let attempted=false;upstream=()=>{attempted=true;throw new Error('Must not call Atlas for invalid DDD');};
+    const invalid=await originalFetch(base+'/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...input,phone:'78999999999'})});
+    assert.equal(invalid.status,400);assert.match((await invalid.json()).error,/DDD/);assert.equal(attempted,false);
+  }finally{server.close();globalThis.fetch=originalFetch;console.warn=originalWarn;}
 });
 
 test('API bloqueia cobranças sem chave e simulação em Vercel',async()=>{
