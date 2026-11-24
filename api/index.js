@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
-import { webhookAuthorized, receiveNexumWebhook } from '../lib/webhooks.js';
-import { paymentAvailable, reviewMode, visualReview, createCharge, getCharge, simulatePayment, CheckoutError, PRICE, PRODUCT, WHATSAPP, REFUND_URL } from '../lib/checkout.js';
+import { webhookAuthorized, receiveNexumWebhook, atlasWebhookAuthorized } from '../lib/webhooks.js';
+import { paymentAvailable, reviewMode, visualReview, createCharge, getCharge, receiveAtlasWebhook, simulatePayment, CheckoutError, PRICE, PRODUCT, WHATSAPP, REFUND_URL } from '../lib/checkout.js';
 
 async function readBody(req) {
   if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) return req.body;
@@ -23,6 +23,12 @@ export default async function handler(req, res) {
   const json = (status, body) => { res.statusCode = status; res.setHeader('Content-Type', 'application/json; charset=utf-8'); res.end(JSON.stringify(body)); };
   const route = new URL(req.url, 'http://localhost').pathname;
   try {
+    if (route === '/api/webhooks/atlas') {
+      if (req.method !== 'POST') return json(405, { error: 'Método não permitido.' });
+      if (!atlasWebhookAuthorized(new URL(req.url, 'http://localhost').searchParams.get('token'))) throw new CheckoutError('Webhook não autorizado.', 401);
+      if (!String(req.headers['content-type']).includes('application/json')) throw new CheckoutError('Envie os dados em JSON.', 415);
+      return json(200, await receiveAtlasWebhook(await readBody(req)));
+    }
     if (route === '/api/webhooks/nexum') {
       if (req.method !== 'POST') return json(405, { error: 'Método não permitido.' });
       if (!webhookAuthorized(req.headers['x-webhook-token'])) throw new CheckoutError('Webhook não autorizado.', 401);

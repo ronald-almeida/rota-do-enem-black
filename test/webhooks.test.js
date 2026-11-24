@@ -3,30 +3,75 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import handler from '../api/index.js';
-import { createCharge } from '../lib/checkout.js';
-import { webhookAuthorized, receiveNexumWebhook, webhookConfiguration } from '../lib/webhooks.js';
+import { createCharge, receiveAtlasWebhook } from '../lib/checkout.js';
+import { webhookAuthorized, receiveNexumWebhook, webhookConfiguration, atlasWebhookConfiguration, atlasWebhookAuthorized } from '../lib/webhooks.js';
 
 const pendingUrl = 'https://api.pushcut.io/test-secret/notifications/pending';
 const paidUrl = 'https://api.pushcut.io/test-secret/notifications/paid';
 function event(id, status = 'PENDING') { return { event: 'pix.status_changed', tx_id: id, status, paid: status === 'PAID', transaction: { id, status, amount: 247, external_reference: 'rota-nexum-247-10000000-0000-4000-8000-000000000001' }, customer: { email: 'private@example.com', document: '52998224725' } }; }
 async function setup(run) {
   const originalFetch = globalThis.fetch;
-  const keys = ['NEXUM_WEBHOOK_TOKEN', 'PUSHCUT_PIX_PENDING_URL', 'PUSHCUT_PIX_PAID_URL', 'NEXUM_API_CHAT_ID', 'NEXUM_API_CREDENTIAL', 'LOCAL_REVIEW'];
+  const keys = ['NEXUM_WEBHOOK_TOKEN', 'PUSHCUT_PIX_PENDING_URL', 'PUSHCUT_PIX_PAID_URL', 'NEXUM_API_CHAT_ID', 'NEXUM_API_CREDENTIAL', 'LOCAL_REVIEW', 'ATLAS_SECRET_KEY'];
   const before = Object.fromEntries(keys.map(key => [key, process.env[key]]));
   process.env.NEXUM_WEBHOOK_TOKEN = 'test-webhook-secret'; process.env.PUSHCUT_PIX_PENDING_URL = pendingUrl; process.env.PUSHCUT_PIX_PAID_URL = paidUrl;
   process.env.NEXUM_API_CHAT_ID = '1000000000'; process.env.NEXUM_API_CREDENTIAL = 'test-credential'; delete process.env.LOCAL_REVIEW;
+  process.env.ATLAS_SECRET_KEY = 'atlas-test-secret';
   try { await run(originalFetch); } finally { globalThis.fetch = originalFetch; for (const [key, value] of Object.entries(before)) if (value === undefined) delete process.env[key]; else process.env[key] = value; }
 }
 
 test('webhook exige segredo correto e configura callback HTTPS por cobrança', async () => setup(async () => {
   assert.equal(webhookAuthorized(undefined), false); assert.equal(webhookAuthorized('wrong'), false); assert.equal(webhookAuthorized('test-webhook-secret'), true);
   assert.deepEqual(webhookConfiguration(), { url: 'https://rota-do-enem-black.vercel.app/api/webhooks/nexum', token: 'test-webhook-secret' });
+  assert.equal(atlasWebhookAuthorized(new URL(atlasWebhookConfiguration()).searchParams.get('token')), true);
+  assert.equal(atlasWebhookAuthorized('wrong'), false); assert.equal(atlasWebhookAuthorized('é'.repeat(64)), false);
   globalThis.fetch = async (url, options) => {
-    const body = JSON.parse(options.body); assert.deepEqual(body.webhook, webhookConfiguration());
-    return Response.json({ ok: true, tx_id: 'callback_created', amount: 247, status: 'PENDING', qr_code_text: '000201TEST', expires_in_seconds: 86400, external_reference: body.externalReference });
+    const body = JSON.parse(options.body); assert.equal(body.postback_url, atlasWebhookConfiguration());
+    return Response.json({ id: 'callback_created', amount: 397, status: 'pending', method: 'pix', livemode: true, metadata: body.metadata, external_id: body.external_id, pix: { code: '000201TEST', expires_at: new Date(Date.now() + 1800000).toISOString() } });
   };
   const created = await createCharge({ name: 'Pessoa Teste', email: 'aluno@example.com', emailConfirmation: 'aluno@example.com', document: '52998224725', phone: '11999999999', accepted: true, requestId: '10000000-0000-4000-8000-000000000001' });
-  assert.doesNotMatch(JSON.stringify(created), /test-webhook-secret|pushcut|test-credential/);
+  assert.doesNotMatch(JSON.stringify(created), /test-webhook-secret|pushcut|test-credential|atlas-test-secret|postback_url/);
+}));
+
+const atlasOrder = 'rota-atlas-397-10000000-0000-4000-8000-000000000001';
+function atlasEvent(id, state = 'pending') { return { type: 'transaction.' + state, livemode: true, data: { id, external_id: atlasOrder, status: state } }; }
+function atlasCharge(id, state = 'pending') { return { id, external_id: atlasOrder, amount: 397, status: state, method: 'pix', livemode: true, metadata: { product: 'rota-black-2026' } }; }
+
+test('Atlas só notifica depois de consultar e validar o pagamento no servidor', async () => setup(async () => {
+  const sent = []; let charge = atlasCharge('atlas_notice');
+  globalThis.fetch = async (url, options) => {
+    if (String(url).startsWith('https://atlaspags.com/api/v1/charges/')) {
+      assert.equal(options.headers.Authorization, 'Bearer atlas-test-secret'); return Response.json(charge);
+    }
+    sent.push(url); return Response.json({ ok: true });
+  };
+  assert.equal((await receiveAtlasWebhook(atlasEvent(charge.id))).ok, true);
+  assert.equal((await receiveAtlasWebhook(atlasEvent(charge.id, 'paid'))).ignored, true); assert.equal(sent.length, 1);
+  charge.status = 'paid'; assert.equal((await receiveAtlasWebhook(atlasEvent(charge.id, 'paid'))).ok, true);
+  assert.equal((await receiveAtlasWebhook(atlasEvent(charge.id, 'paid'))).duplicate, true);
+  assert.deepEqual(sent, [pendingUrl, paidUrl]);
+  charge = { ...charge, refunded: 1 }; assert.equal((await receiveAtlasWebhook(atlasEvent(charge.id, 'paid'))).ignored, true);
+  charge = { ...charge, amount: 247 }; await assert.rejects(receiveAtlasWebhook(atlasEvent(charge.id, 'paid')), /validar/);
+  assert.equal((await receiveAtlasWebhook({ ...atlasEvent(charge.id), livemode: false })).ignored, true);
+  assert.equal((await receiveAtlasWebhook({ type: 'webhook.test' })).ignored, true);
+  assert.equal(sent.length, 2);
+}));
+
+test('endpoint Atlas autentica callback antes de consultar e não confia no status recebido', async () => setup(async originalFetch => {
+  const server = createServer(handler).listen(0, '127.0.0.1'); await once(server, 'listening'); const base = 'http://127.0.0.1:' + server.address().port;
+  let queried = 0, sent = 0;
+  globalThis.fetch = async (url, options) => {
+    if (String(url).startsWith('https://atlaspags.com/')) { queried++; return Response.json(atlasCharge('atlas_route')); }
+    if (String(url).startsWith('https://api.pushcut.io/')) { sent++; return Response.json({ ok: true }); }
+    return originalFetch(url, options);
+  };
+  const post = (query, body) => originalFetch(base + '/api/webhooks/atlas' + query, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://atlaspags.com' }, body: JSON.stringify(body) });
+  try {
+    assert.equal((await post('?token=wrong', atlasEvent('atlas_route'))).status, 401); assert.equal(queried, 0);
+    const validQuery = new URL(atlasWebhookConfiguration()).search;
+    assert.equal((await post(validQuery, atlasEvent('atlas_route', 'paid'))).status, 200); assert.equal(sent, 0);
+    assert.equal((await post(validQuery, atlasEvent('atlas_route'))).status, 200); assert.equal(sent, 1);
+    assert.equal((await originalFetch(base + '/api/webhooks/atlas')).status, 405);
+  } finally { server.close(); }
 }));
 
 test('pendente e pago acionam links distintos, sem enviar dados do comprador', async () => setup(async () => {

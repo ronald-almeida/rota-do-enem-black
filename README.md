@@ -1,72 +1,55 @@
 # Rota do Enem - Black Friday
 
-Cópia da página de vendas fornecida, com imagens e estilos locais, checkout Pix Nexum de R$ 247, página de obrigado e PDF introdutório. Pronto para Vercel, com JavaScript nativo e uma função Node.js.
+Página de vendas com imagens e estilos locais, checkout Pix Atlas Pags de R$ 397, página de obrigado e PDF introdutório. JavaScript nativo e uma função Node.js na Vercel.
 
 ## Revisão local
 
-Requer Node.js 24. Não há dependências de aplicação para instalar.
+Requer Node.js 24, sem dependências de aplicação. Execute npm run dev:review e abra http://127.0.0.1:4173. Pagamentos simulados são identificados com aviso; nenhuma chamada ao gateway ou Pushcut é feita. O botão de simular aprovação permite revisar obrigado e PDF. Simulação é recusada na Vercel e com NODE_ENV=production.
 
-```sh
-npm run dev:review
-```
+Rotas: /, /checkout, /pagamento, /obrigado, /termos, /privacidade. Em Preview e revisão local, /api/review-thanks e /api/review-pdf oferecem uma prévia identificada, sem aprovar pedidos. Retornam 404 em produção.
 
-Abra `http://127.0.0.1:4173`. Nesse modo os pagamentos são simulados e identificados com um aviso. No pagamento há um botão para simular aprovação e revisar a página de obrigado. Nenhuma chamada ao gateway é feita nesse modo. A simulação é recusada em ambientes Vercel ou com NODE_ENV=production.
+## Configuração e publicação
 
-Rotas: `/`, `/checkout`, `/pagamento`, `/obrigado`, `/termos`, `/privacidade`.
+Projeto Vercel rota-do-enem-black, equipe team_dZlw0XSD1Tl5Z4gE3kUxXVS6. Repositório conectado: ronald-almeida/rota-do-enem-black. Commits na branch de produção codex/rota-black-review publicam automaticamente em https://rota-do-enem-black.vercel.app/. Outras branches geram previews.
 
-Nos deployments de Preview e na revisão local, `/api/review-thanks` abre uma prévia visual identificada da página de obrigado e permite revisar o PDF sem pagar. Essa rota e `/api/review-pdf` retornam 404 em produção. A prévia visual não aprova pedidos nem habilita simulações de cobrança na Vercel.
+Framework Other, Node.js 24.x, build node scripts/check.mjs, output public.
 
-## Configuração Vercel
+- ATLAS_SECRET_KEY: chave secreta de produção da Atlas, usada para criar e consultar cobranças. Nunca enviar ao navegador ou Git.
+- PUBLIC_SITE_URL: opcional; padrão https://rota-do-enem-black.vercel.app.
+- PUSHCUT_PIX_PENDING_URL e PUSHCUT_PIX_PAID_URL: links secretos de Pix gerado e venda aprovada, somente no servidor.
+- NEXUM_API_CHAT_ID, NEXUM_API_CREDENTIAL, NEXUM_API_ORIGIN e NEXUM_WEBHOOK_TOKEN: manter para consultar pedidos Nexum existentes e receber seus avisos. Não são usados para novas compras. A antiga variável NEXUM_ALLOW_LIMIT_TEST não é mais utilizada.
+- ORDER_SIGNING_SECRET: opcional; sem ela a sessão usa a credencial do gateway correspondente. Não alterar durante a migração, pois invalida sessões existentes.
 
-Projeto existente: `rota-do-enem-black`, equipe `team_dZlw0XSD1Tl5Z4gE3kUxXVS6`.
+Variáveis devem estar em Production; alterações exigem novo deployment. /api/config verifica a chave Atlas com GET /api/v1/ping, sem efeito financeiro, e exige ok: true e livemode: true. Isso verifica autenticação e ambiente, não garante que uma cobrança será aceita pelo processador. Documentação: https://atlaspags.com/docs/ (consultada em 24/11/2026).
 
-Repositório conectado: `ronald-almeida/rota-do-enem-black`. A integração nativa do GitHub com a Vercel publica automaticamente os commits da branch de produção `codex/rota-black-review`, que também é a branch padrão atual do repositório; outras branches geram previews. A conexão pode ser conferida em **Settings > Git**, e a branch em **Settings > Environments > Production**.
+## Pagamento e compatibilidade
 
-Site de produção: https://rota-do-enem-black.vercel.app/.
+O servidor fixa R$ 397, valida CPF, nome, e-mail, confirmação, DDD e consentimento. Cria o Pix com POST /api/v1/charges, method: pix, itens totalizando R$ 397, produto rota-black-2026, checkout_url e referência rota-atlas-397-{UUID}. A mesma referência é a Idempotency-Key; uma falha de rede preserva a tentativa. O valor enviado pelo navegador nunca define a cobrança.
 
-- Framework: Other. Node.js: 24.x.
-- Build: `node scripts/check.mjs`. Output: `public`.
-- `NEXUM_API_CHAT_ID`: identificador da conta Nexum, obtido em Painel > Integração.
-- `NEXUM_API_CREDENTIAL`: credencial fixa da API Nexum, salva como Secret em Production. Não é o token de login do painel. Nunca adicionar ao Git ou ao navegador.
-- `NEXUM_API_ORIGIN`: opcional; padrão `https://nexumpaybot.com`, conforme os exemplos oficiais. Deve ser uma origem aceita pelo gateway.
-- `NEXUM_ALLOW_LIMIT_TEST=1`: liberação temporária solicitada para testar a geração real de R$ 247 mesmo quando a consulta de autenticação informa teto inferior. Mantém a validação de credenciais, conta ativa, valor e pagamento. A Nexum continua podendo recusar a criação. Defina `0` ou remova a variável e publique novamente para restaurar a verificação antecipada de limites.
-- `ORDER_SIGNING_SECRET`: opcional, segredo aleatório separado para a sessão de consulta. Se ausente, usa a credencial do gateway correspondente. Não trocar durante a migração, pois isso invalida sessões existentes.
-- `ATLAS_SECRET_KEY`: manter a chave atual apenas para consultar os pedidos antigos. Nenhuma nova cobrança usa Atlas.
-- `NEXUM_WEBHOOK_TOKEN`: segredo aleatório enviado na criação da cobrança e verificado no header `X-Webhook-Token` dos callbacks.
-- `PUSHCUT_PIX_PENDING_URL` e `PUSHCUT_PIX_PAID_URL`: links secretos das notificações de Pix gerado e venda aprovada. Salvar como Secret em Production; nunca colocar no frontend ou no Git.
-- `/api/config` verifica a autenticação e, salvo a liberação temporária acima, se a conta aceita depósitos de R$ 247. Sem credenciais válidas, checkout informa indisponibilidade. Nunca gera Pix de demonstração em produção.
+O servidor consulta GET /api/v1/charges/{id} e confere ID, referência, produto, método, valor e ambiente. Só um pagamento confirmado sem estorno libera o PDF. Respostas são filtradas: credenciais, callback e dados pessoais não chegam ao navegador. Uma recusa definitiva permite outra tentativa.
 
-Após adicionar/alterar variáveis, é necessário criar novo deployment. A integração segue https://app.nexumpaybot.com/api/index.html (consultada em 24/11/2026). A validação de credenciais usa `GET /api/public/auth/validate`, sem gerar cobrança. Os testes automatizados usam respostas simuladas; não movimentam dinheiro.
+Sessões Atlas anteriores continuam válidas por R$ 397. Sessões Nexum existentes continuam consultando GET /api/public/pix/status/{tx_id} por R$ 247. Pagamento e recibo mostram o valor verificado daquele pedido. Sessões são assinadas e expiram em sete dias. Credenciais antigas são preservadas para essa compatibilidade.
 
-## Fluxo e limites
-
-O servidor fixa o preço em 247 reais, valida cadastro e CPF e cria a cobrança com `POST /api/public/pix/create`, `Idempotency-Key` e `externalReference`. Normaliza o nome do pagador para letras sem acentos, como exigido pela Nexum. A mesma tentativa com os mesmos dados é reutilizada após falha de rede. Dados pessoais não ficam no armazenamento do navegador; apenas o hash do formulário, identificador da tentativa e dados técnicos do pedido.
-
-O pagamento é confirmado consultando `GET /api/public/pix/status/{tx_id}` pelo servidor. A sessão assinada vincula gateway, transação, referência e valor; a resposta deve corresponder ao ID e ao valor e, quando presente, à referência externa. Somente os status de confirmação documentados liberam acesso. O QR Code base64 é exibido como imagem local de dados, junto do código Copia e Cola.
-
-O navegador aguarda pelo menos 30 segundos entre consultas e respeita `Retry-After` em HTTP 429, inclusive após recarregar a página. Resultados assinados válidos por 30 segundos e consultas simultâneas compartilhadas evitam chamadas repetidas no fluxo pagamento → obrigado → PDF. A Nexum é a fonte do estado. Um resultado HTTP 202/PROCESSING mantém a sessão consultável e permite voltar ao checkout com os mesmos dados e a mesma tentativa para recuperar o código, sem inventar aprovação ou trocar a chave idempotente.
+O navegador aguarda pelo menos 30 segundos entre consultas e respeita Retry-After, inclusive após recarregar. Para Nexum, snapshots assinados e consultas simultâneas compartilhadas evitam chamadas repetidas entre pagamento, obrigado e PDF. Pedidos Nexum em PROCESSING continuam consultáveis sem inventar código Pix ou aprovação.
 
 ## Notificações Pushcut
 
-Cada nova cobrança registra o callback `https://rota-do-enem-black.vercel.app/api/webhooks/nexum`. O servidor autentica o segredo, confere o ID, a referência do pedido, o valor e o status do evento. `PENDING` aciona o link de Pix gerado; `PAID` com `paid: true` aciona venda aprovada. Falhas, reembolsos e outros pedidos são ignorados. Nenhum dado pessoal é enviado ao Pushcut e os textos configurados no aplicativo são preservados.
+Cada nova cobrança Atlas registra postback_url em /api/webhooks/atlas, com token secreto derivado da chave Atlas por HMAC e separado por finalidade. O token fica exclusivamente na comunicação entre servidores; não é a assinatura X-Atlas-Signature. O endpoint compara o token em tempo constante e então consulta novamente a cobrança na API autenticada da Atlas. O corpo do callback nunca é usado como prova de pagamento.
 
-As notificações independem de a página permanecer aberta. Uma falha no Pushcut retorna HTTP 503 para permitir as retentativas da Nexum. Eventos repetidos são deduplicados na instância e recebem um ID estável de notificação; sem um banco persistente, não há garantia de entrega exatamente uma vez entre instâncias ou após falhas de rede. O webhook não libera acesso: a página de obrigado e o PDF continuam exigindo consulta autenticada ao gateway.
+Somente transaction.pending e transaction.paid em produção, de pedidos rota-atlas-397-*, são considerados. A consulta deve confirmar valor, produto, referência, ID, método, ambiente, ausência de estorno e status correspondente. Forjar um status no callback não dispara venda aprovada. Os avisos independem de o comprador manter a página aberta.
 
-Sessões Atlas emitidas antes da migração continuam consultando o gateway antigo e validando o valor original de R$ 397. As telas de pagamento e recibo exibem o valor verificado daquele pedido. O checkout de novas compras sempre usa Nexum e R$ 247.
+O endpoint /api/webhooks/nexum continua autenticando X-Webhook-Token para os pedidos anteriores de R$ 247. PENDING gera o aviso de Pix; PAID com paid: true gera o aviso de venda. Falhas, reembolsos e outros pedidos são ignorados.
 
-Somente pedidos pagos dão acesso ao PDF por `/api/intro`. Abrir diretamente `/obrigado` não confirma uma compra. A cobrança expirada, falha, reembolsada ou contestada não aparece como aprovada. A validade da sessão de consulta é de sete dias; depois, atendimento pelo WhatsApp.
+Nenhum dado pessoal é enviado ao Pushcut, e os textos configurados no aplicativo são preservados. Falha de entrega retorna HTTP 503 para retentativa. Eventos repetidos são deduplicados na instância e recebem ID estável; sem banco persistente não há garantia de entrega exatamente uma vez entre instâncias ou após falhas de rede. Webhooks não liberam o PDF: ele exige consulta autenticada ao gateway.
 
-A liberação do curso e o envio das credenciais por e-mail são feitos pela equipe, em até dois dias úteis. Este projeto não cria contas na plataforma do curso nem envia e-mails. Os novos pedidos e dados do pagador ficam disponíveis na conta Nexum. O botão de reembolso abre a central fornecida; não executa estorno automático.
+## Acesso e suporte
 
-WhatsApp: `5575988393742`, confirmado nas páginas recentes. Reembolso: https://reembolso-de-alunos.vercel.app/.
+Somente pedidos pagos dão acesso a /api/intro. Abrir /obrigado diretamente não confirma compra. A equipe libera o curso e envia credenciais por e-mail em até dois dias úteis. Este projeto não cria contas na plataforma do curso nem envia e-mails. Novos pedidos ficam na conta Atlas; o botão de reembolso abre a central fornecida, sem executar estorno automático.
+
+WhatsApp: 5575988393742. Reembolso: https://reembolso-de-alunos.vercel.app/. As remoções solicitadas do vídeo privado e caixas de prazo/ajuda no checkout e pagamento foram preservadas.
 
 ## Verificação
 
-```sh
-npm run build
-node --test --test-isolation=none
-```
+Execute npm run build e node --test --test-isolation=none.
 
-Testes de contrato com respostas simuladas: preço imutável, autenticação, idempotência, normalização do nome, CPF, DDD, confirmação de e-mail, tokens adulterados/expirados, validação da cobrança, status, reconciliação HTTP 202, intervalo de consulta, HTTP 429, indisponibilidade, compatibilidade com pedidos Atlas, bloqueio de simulação em Vercel e acesso protegido ao PDF. Nenhuma cobrança real é criada pelos testes.
-
-As imagens, textos e promessas comerciais da página original foram preservados, com atualização do preço e do FAQ de acesso e pagamento. O responsável pela oferta deve confirmar a validade dos bônus, conteúdo e garantias antes da campanha.
+Testes usam respostas simuladas, sem cobranças ou notificações reais: contrato Atlas de R$ 397, idempotência, autenticação, cadastro, sessões, consulta de pedidos antigos, status, intervalo de consultas Nexum, indisponibilidade, bloqueio de simulação em produção, PDF protegido e autenticação/validação/deduplicação dos callbacks dos dois gateways.

@@ -9,12 +9,15 @@ import { PRICE, configured, paymentAvailable, validCpf, customerFrom, createChar
 
 const input = { name: 'João da Conceição', email: 'aluno@example.com', emailConfirmation: 'aluno@example.com', document: '52998224725', phone: '11999999999', accepted: true, requestId: '10000000-0000-4000-8000-000000000001' };
 const external = 'rota-nexum-247-' + input.requestId;
+const atlasExternal = 'rota-atlas-397-' + input.requestId;
+const atlasPending = { id: 'atlas_test', external_id: atlasExternal, amount: 397, method: 'pix', metadata: { product: 'rota-black-2026' }, livemode: true, status: 'pending', pix: { code: '000201TEST', qr_code_image: 'data:image/png;base64,aGVsbG8=', expires_at: new Date(Date.now() + 1800000).toISOString() } };
 const pending = { ok: true, tx_id: 'nexum_test', status: 'PENDING', amount: 247, external_reference: external, qr_code_text: '000201TEST', qr_code_base64: 'aGVsbG8=', expires_in_seconds: 86400 };
 function credentials() {
+  process.env.ATLAS_SECRET_KEY = 'test-atlas-key';
   for (const key of ['LOCAL_REVIEW', 'VERCEL', 'VERCEL_ENV', 'ORDER_SIGNING_SECRET', 'NEXUM_ALLOW_LIMIT_TEST']) delete process.env[key];
   process.env.NEXUM_API_CHAT_ID = '1000000000'; process.env.NEXUM_API_CREDENTIAL = 'test-credential-no-live-requests';
 }
-function tokenFor(id, options = {}) { return signOrder({ id, external_id: external, amount: PRICE, provider: 'nexum', ...options }); }
+function tokenFor(id, options = {}) { return signOrder({ id, external_id: external, amount: 247, provider: 'nexum', ...options }); }
 async function withFetch(mock, run) { const original = globalThis.fetch; globalThis.fetch = mock; try { await run(); } finally { globalThis.fetch = original; } }
 async function withApi(run) {
   const server = createServer(handler).listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -40,20 +43,22 @@ test('sessões recusam adulteração, expiração e mudança de valor ou gateway
   assert.throws(() => verifyOrder(Buffer.from(JSON.stringify(payload)).toString('base64url') + '.' + parts[1]), /inválida/);
 });
 
-test('contrato Nexum: 247 reais, nome normalizado, origem, autenticação e idempotência', async () => {
+test('contrato Atlas: 397 reais, autenticação, callback e idempotência', async () => {
   credentials(); const captured = [];
-  await withFetch(async (url, options) => { captured.push({ url, options }); return Response.json(pending); }, async () => {
+  await withFetch(async (url, options) => { captured.push({ url, options }); return Response.json(atlasPending); }, async () => {
     const first = await createCharge({ ...input, amount: 1 }); await createCharge(input);
-    assert.equal(captured[0].url, 'https://api.nexumpaybot.com/api/public/pix/create');
-    assert.deepEqual(JSON.parse(captured[0].options.body), { amount: 247, generatedName: 'Joao da Conceicao', generatedEmail: input.email, generatedDocument: input.document, externalReference: external });
-    assert.equal(captured[0].options.headers.Origin, 'https://nexumpaybot.com');
-    assert.equal(captured[0].options.headers['X-API-Chat-Id'], process.env.NEXUM_API_CHAT_ID);
-    assert.equal(captured[0].options.headers['X-API-Credential'], process.env.NEXUM_API_CREDENTIAL);
+    assert.equal(captured[0].url, 'https://atlaspags.com/api/v1/charges');
+    const body = JSON.parse(captured[0].options.body);
+    assert.equal(body.amount, 397); assert.equal(body.items[0].unit_amount, 397); assert.equal(body.method, 'pix');
+    assert.deepEqual(body.customer, customerFrom(input)); assert.equal(body.external_id, atlasExternal);
+    assert.equal(body.checkout_url, 'https://rota-do-enem-black.vercel.app/checkout');
+    assert.match(body.postback_url, /^https:\/\/rota-do-enem-black.vercel.app\/api\/webhooks\/atlas\?token=[a-f0-9]{64}$/);
+    assert.equal(captured[0].options.headers.Authorization, 'Bearer test-atlas-key');
     assert.equal(captured[0].options.headers['Idempotency-Key'], captured[1].options.headers['Idempotency-Key']);
-    assert.equal(first.amount, 247); assert.equal(first.pix.image, 'data:image/png;base64,aGVsbG8='); assert.ok(Date.parse(first.pix.expiresAt) > Date.now());
-    assert.doesNotMatch(JSON.stringify(first), /aluno@example.com|52998224725|test-credential/);
-    assert.equal((await getCharge(first.token)).status, 'pending'); assert.equal(captured.length, 2);
-    assert.ok(first.nextPollAt > Date.now() + 29000);
+    assert.equal(first.amount, 397); assert.equal(first.pix.image, 'data:image/png;base64,aGVsbG8=');
+    assert.equal(verifyOrder(first.token).provider, 'atlas');
+    assert.doesNotMatch(JSON.stringify(first), /aluno@example.com|52998224725|test-atlas-key|postback_url|webhooks/);
+    assert.equal((await getCharge(first.token)).status, 'pending');
   });
 });
 
@@ -89,21 +94,20 @@ test('consulta respeita 30 segundos e compartilha chamadas simultâneas', async 
   });
 });
 
-test('202 em reconciliação mantém pedido consultável sem inventar QR ou aprovação', async () => {
+test('pedidos Nexum em reconciliação continuam consultáveis', async () => {
   credentials();
   await withFetch(async () => Response.json({ ok: true, tx_id: 'processing_202', amount: 247, status: 'PROCESSING', reconciliation_required: true }, { status: 202 }), async () => {
-    const result = await createCharge(input); assert.equal(result.status, 'pending'); assert.equal(result.pix, undefined);
-    assert.equal(verifyOrder(result.token).id, 'processing_202'); assert.equal((await getCharge(result.token)).status, 'pending');
+    const result = await getCharge(tokenFor('processing_202')); assert.equal(result.status, 'pending'); assert.equal(result.pix, undefined);
   });
 });
 
 test('falha permite nova tentativa, timeout preserva a chave e logs não vazam dados', async () => {
   credentials(); const originalWarn = console.warn; const warnings = []; console.warn = (...args) => warnings.push(args.join(' '));
   try {
-    await withFetch(async () => Response.json({ ...pending, status: 'FAILED' }), async () => { await assert.rejects(createCharge(input), error => error.code === 'PIX_CREATION_FAILED' && error.retryWithNewAttempt === true); });
+    await withFetch(async () => Response.json({ ...atlasPending, status: 'failed' }), async () => { await assert.rejects(createCharge(input), error => error.code === 'PIX_CREATION_FAILED' && error.retryWithNewAttempt === true); });
     await withFetch(async () => { throw new TypeError('secret upstream error'); }, async () => { await assert.rejects(createCharge(input), error => error.status === 503 && !error.retryWithNewAttempt); });
     await withFetch(async () => Response.json({ ok: false, message: 'aluno@example.com 52998224725' }, { status: 403 }), async () => { await assert.rejects(createCharge(input)); });
-    assert.match(warnings.join('\n'), /authentication_or_origin/); assert.doesNotMatch(warnings.join('\n'), /aluno@example.com|52998224725|test-credential|secret upstream/);
+    assert.match(warnings.join('\n'), /atlas_request_failed/); assert.doesNotMatch(warnings.join('\n'), /aluno@example.com|52998224725|test-credential|secret upstream/);
     let attempted = false;
     await withFetch(async () => { attempted = true; throw Error(); }, async () => { await assert.rejects(createCharge({ ...input, phone: '78999999999' }), /DDD/); assert.equal(attempted, false); });
   } finally { console.warn = originalWarn; }
@@ -125,11 +129,11 @@ test('pedidos Atlas existentes continuam consultáveis por 397', async () => {
   }, async () => { const result = await getCharge(token); assert.equal(result.status, 'paid'); assert.equal(result.amount, 397); });
 });
 
-test('sem as duas credenciais Nexum bloqueia; simulação e prévias não abrem em produção', async () => {
-  credentials(); delete process.env.NEXUM_API_CHAT_ID; assert.equal(configured(), false);
+test('sem a chave Atlas bloqueia; simulação e prévias não abrem em produção', async () => {
+  credentials(); delete process.env.ATLAS_SECRET_KEY; assert.equal(configured(), false);
   process.env.LOCAL_REVIEW = '1'; process.env.VERCEL = '1'; process.env.VERCEL_ENV = 'production'; assert.equal(reviewMode(), false);
   try { await withApi(async base => {
-    const config = await (await fetch(base + '/api/config')).json(); assert.equal(config.available, false); assert.equal(config.price, 247);
+    const config = await (await fetch(base + '/api/config')).json(); assert.equal(config.available, false); assert.equal(config.price, 397);
     const post = (path, data) => fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
     assert.equal((await post('/api/checkout', input)).status, 503);
     assert.equal((await post('/api/review/pay', {})).status, 404); assert.equal((await fetch(base + '/api/intro')).status, 401);
@@ -155,7 +159,7 @@ test('revisão local completa: criação idempotente, aprovação e PDF', async 
   credentials(); process.env.LOCAL_REVIEW = '1';
   try { await withApi(async base => {
     const post = (path, data) => fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-    const created = await (await post('/api/checkout', input)).json(); assert.equal(created.status, 'pending'); assert.equal(created.amount, 247);
+    const created = await (await post('/api/checkout', input)).json(); assert.equal(created.status, 'pending'); assert.equal(created.amount, 397);
     assert.equal((await (await post('/api/checkout', input)).json()).id, created.id);
     assert.equal((await fetch(base + '/api/intro', { headers: { Authorization: 'Bearer ' + created.token } })).status, 403);
     assert.equal((await post('/api/review/pay', { token: created.token })).status, 200);
@@ -166,36 +170,31 @@ test('revisão local completa: criação idempotente, aprovação e PDF', async 
 
 test('todas as telas exibem o preço novo e os blocos removidos não voltam', async () => {
   for (const name of ['index.html', 'checkout.html', 'pagamento.html', 'obrigado.html', 'termos.html']) {
-    const html = await readFile(new URL('../public/' + name, import.meta.url), 'utf8'); assert.match(html, /R\$ 247/); assert.doesNotMatch(html, /R\$ 397/);
+    const html = await readFile(new URL('../public/' + name, import.meta.url), 'utf8'); assert.match(html, /R\$ 397/); assert.doesNotMatch(html, /R\$ 247/);
   }
   assert.doesNotMatch(await readFile(new URL('../public/pagamento.html', import.meta.url), 'utf8'), /class="delivery-note"|class="help-box"/);
 });
 
-test('disponibilidade valida credenciais e limites sem criar cobrança nem expor a conta', async () => {
+test('disponibilidade valida a chave Atlas em produção sem criar cobrança', async () => {
   credentials(); let count = 0;
   await withFetch(async (url, options) => {
-    count++; assert.equal(url, 'https://api.nexumpaybot.com/api/public/auth/validate'); assert.notEqual(options.method, 'POST');
-    return Response.json({ ok: true, authenticated: true, account: { chat_id: process.env.NEXUM_API_CHAT_ID, status: true, min_deposit: 5, max_deposit: 500 } });
+    count++; assert.equal(url, 'https://atlaspags.com/api/v1/ping'); assert.notEqual(options.method, 'POST');
+    return Response.json({ ok: true, livemode: true });
   }, async () => { assert.equal(await paymentAvailable(), true); assert.equal(await paymentAvailable(), true); assert.equal(count, 1); });
 });
 
-test('conta autenticada com teto de 200 reais não habilita cobrança de 247', async () => {
-  credentials(); const now = Date.now; const afterCache = now() + 60000; Date.now = () => afterCache;
+test('Atlas de teste ou chave recusada não habilita produção', async () => {
+  credentials(); const originalNow = Date.now; let now = originalNow() + 60000; Date.now = () => now;
   try {
-    await withFetch(async () => Response.json({ ok: true, authenticated: true, account: { chat_id: process.env.NEXUM_API_CHAT_ID, status: true, min_deposit: 10, max_deposit: 200 } }), async () => { assert.equal(await paymentAvailable(), false); });
-  } finally { Date.now = now; }
+    await withFetch(async () => Response.json({ ok: true, livemode: false }), async () => { assert.equal(await paymentAvailable(), false); });
+    now += 31000;
+    await withFetch(async () => Response.json({ error: { code: 'unauthorized' } }, { status: 401 }), async () => { assert.equal(await paymentAvailable(), false); });
+  } finally { Date.now = originalNow; }
 });
 
-test('liberação de teste permite tentar acima do limite, mas exige autenticação e conta ativa', async () => {
-  credentials(); process.env.NEXUM_ALLOW_LIMIT_TEST = '1';
-  const originalNow = Date.now; let now = originalNow() + 120000; Date.now = () => now;
-  let data = { ok: true, authenticated: true, account: { chat_id: process.env.NEXUM_API_CHAT_ID, status: true, min_deposit: 10, max_deposit: 200 } };
-  try {
-    await withFetch(async () => Response.json(data), async () => {
-      assert.equal(await paymentAvailable(), true);
-      now += 31000; data = { ...data, authenticated: false }; assert.equal(await paymentAvailable(), false);
-      now += 31000; data = { ...data, authenticated: true, account: { ...data.account, status: false } }; assert.equal(await paymentAvailable(), false);
-      now += 31000; data = { ...data, account: { ...data.account, status: true, chat_id: 'another-account' } }; assert.equal(await paymentAvailable(), false);
-    });
-  } finally { Date.now = originalNow; delete process.env.NEXUM_ALLOW_LIMIT_TEST; }
+test('Atlas recusa valor, referência, modo e produto divergentes', async () => {
+  credentials();
+  for (const bad of [{ amount: 247 }, { external_id: 'other' }, { livemode: false }, { metadata: { product: 'other' } }, { method: 'card' }]) {
+    await withFetch(async () => Response.json({ ...atlasPending, ...bad }), async () => { await assert.rejects(createCharge(input), /validar/); });
+  }
 });
