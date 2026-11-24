@@ -178,3 +178,10 @@ test('disponibilidade valida credenciais e limites sem criar cobrança nem expor
     return Response.json({ ok: true, authenticated: true, account: { chat_id: process.env.NEXUM_API_CHAT_ID, status: true, min_deposit: 5, max_deposit: 500 } });
   }, async () => { assert.equal(await paymentAvailable(), true); assert.equal(await paymentAvailable(), true); assert.equal(count, 1); });
 });
+
+test('conta autenticada com teto de 200 reais não habilita cobrança de 247', async () => {
+  credentials(); const now = Date.now; const afterCache = now() + 60000; Date.now = () => afterCache;
+  try {
+    await withFetch(async () => Response.json({ ok: true, authenticated: true, account: { chat_id: process.env.NEXUM_API_CHAT_ID, status: true, min_deposit: 10, max_deposit: 200 } }), async () => { assert.equal(await paymentAvailable(), false); });
+  } finally { Date.now = now; }
+});
