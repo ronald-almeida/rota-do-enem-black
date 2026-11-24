@@ -11,7 +11,7 @@ const input = { name: 'João da Conceição', email: 'aluno@example.com', emailC
 const external = 'rota-nexum-247-' + input.requestId;
 const pending = { ok: true, tx_id: 'nexum_test', status: 'PENDING', amount: 247, external_reference: external, qr_code_text: '000201TEST', qr_code_base64: 'aGVsbG8=', expires_in_seconds: 86400 };
 function credentials() {
-  for (const key of ['LOCAL_REVIEW', 'VERCEL', 'VERCEL_ENV', 'ORDER_SIGNING_SECRET']) delete process.env[key];
+  for (const key of ['LOCAL_REVIEW', 'VERCEL', 'VERCEL_ENV', 'ORDER_SIGNING_SECRET', 'NEXUM_ALLOW_LIMIT_TEST']) delete process.env[key];
   process.env.NEXUM_API_CHAT_ID = '1000000000'; process.env.NEXUM_API_CREDENTIAL = 'test-credential-no-live-requests';
 }
 function tokenFor(id, options = {}) { return signOrder({ id, external_id: external, amount: PRICE, provider: 'nexum', ...options }); }
@@ -184,4 +184,18 @@ test('conta autenticada com teto de 200 reais não habilita cobrança de 247', a
   try {
     await withFetch(async () => Response.json({ ok: true, authenticated: true, account: { chat_id: process.env.NEXUM_API_CHAT_ID, status: true, min_deposit: 10, max_deposit: 200 } }), async () => { assert.equal(await paymentAvailable(), false); });
   } finally { Date.now = now; }
+});
+
+test('liberação de teste permite tentar acima do limite, mas exige autenticação e conta ativa', async () => {
+  credentials(); process.env.NEXUM_ALLOW_LIMIT_TEST = '1';
+  const originalNow = Date.now; let now = originalNow() + 120000; Date.now = () => now;
+  let data = { ok: true, authenticated: true, account: { chat_id: process.env.NEXUM_API_CHAT_ID, status: true, min_deposit: 10, max_deposit: 200 } };
+  try {
+    await withFetch(async () => Response.json(data), async () => {
+      assert.equal(await paymentAvailable(), true);
+      now += 31000; data = { ...data, authenticated: false }; assert.equal(await paymentAvailable(), false);
+      now += 31000; data = { ...data, authenticated: true, account: { ...data.account, status: false } }; assert.equal(await paymentAvailable(), false);
+      now += 31000; data = { ...data, account: { ...data.account, status: true, chat_id: 'another-account' } }; assert.equal(await paymentAvailable(), false);
+    });
+  } finally { Date.now = originalNow; delete process.env.NEXUM_ALLOW_LIMIT_TEST; }
 });

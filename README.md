@@ -29,11 +29,12 @@ Site de produção: https://rota-do-enem-black.vercel.app/.
 - `NEXUM_API_CHAT_ID`: identificador da conta Nexum, obtido em Painel > Integração.
 - `NEXUM_API_CREDENTIAL`: credencial fixa da API Nexum, salva como Secret em Production. Não é o token de login do painel. Nunca adicionar ao Git ou ao navegador.
 - `NEXUM_API_ORIGIN`: opcional; padrão `https://nexumpaybot.com`, conforme os exemplos oficiais. Deve ser uma origem aceita pelo gateway.
+- `NEXUM_ALLOW_LIMIT_TEST=1`: liberação temporária solicitada para testar a geração real de R$ 247 mesmo quando a consulta de autenticação informa teto inferior. Mantém a validação de credenciais, conta ativa, valor e pagamento. A Nexum continua podendo recusar a criação. Defina `0` ou remova a variável e publique novamente para restaurar a verificação antecipada de limites.
 - `ORDER_SIGNING_SECRET`: opcional, segredo aleatório separado para a sessão de consulta. Se ausente, usa a credencial do gateway correspondente. Não trocar durante a migração, pois isso invalida sessões existentes.
 - `ATLAS_SECRET_KEY`: manter a chave atual apenas para consultar os pedidos antigos. Nenhuma nova cobrança usa Atlas.
 - `NEXUM_WEBHOOK_TOKEN`: segredo aleatório enviado na criação da cobrança e verificado no header `X-Webhook-Token` dos callbacks.
 - `PUSHCUT_PIX_PENDING_URL` e `PUSHCUT_PIX_PAID_URL`: links secretos das notificações de Pix gerado e venda aprovada. Salvar como Secret em Production; nunca colocar no frontend ou no Git.
-- `/api/config` verifica a autenticação e se a conta aceita depósitos de R$ 247. Sem credenciais válidas, checkout informa indisponibilidade. Nunca gera Pix de demonstração em produção.
+- `/api/config` verifica a autenticação e, salvo a liberação temporária acima, se a conta aceita depósitos de R$ 247. Sem credenciais válidas, checkout informa indisponibilidade. Nunca gera Pix de demonstração em produção.
 
 Após adicionar/alterar variáveis, é necessário criar novo deployment. A integração segue https://app.nexumpaybot.com/api/index.html (consultada em 24/11/2026). A validação de credenciais usa `GET /api/public/auth/validate`, sem gerar cobrança. Os testes automatizados usam respostas simuladas; não movimentam dinheiro.
 
