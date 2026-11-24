@@ -1,22 +1,27 @@
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import handler from '../api/index.js';
 import { createCharge, receiveAtlasWebhook } from '../lib/checkout.js';
 import { webhookAuthorized, receiveNexumWebhook, webhookConfiguration, atlasWebhookConfiguration, atlasWebhookAuthorized } from '../lib/webhooks.js';
+import { notificationStore } from '../lib/notification-store.js';
+import { fakeNotificationStore } from './fixtures/notification-store.mjs';
 
 const pendingUrl = 'https://api.pushcut.io/test-secret/notifications/pending';
 const paidUrl = 'https://api.pushcut.io/test-secret/notifications/paid';
 function event(id, status = 'PENDING') { return { event: 'pix.status_changed', tx_id: id, status, paid: status === 'PAID', transaction: { id, status, amount: 247, external_reference: 'rota-nexum-247-10000000-0000-4000-8000-000000000001' }, customer: { email: 'private@example.com', document: '52998224725' } }; }
 async function setup(run) {
+  const store = fakeNotificationStore();
+  const claim = mock.method(notificationStore, 'claim', store.claim), finish = mock.method(notificationStore, 'finish', store.finish);
   const originalFetch = globalThis.fetch;
-  const keys = ['NEXUM_WEBHOOK_TOKEN', 'PUSHCUT_PIX_PENDING_URL', 'PUSHCUT_PIX_PAID_URL', 'NEXUM_API_CHAT_ID', 'NEXUM_API_CREDENTIAL', 'LOCAL_REVIEW', 'ATLAS_SECRET_KEY'];
+  const keys = ['NEXUM_WEBHOOK_TOKEN', 'PUSHCUT_PIX_PENDING_URL', 'PUSHCUT_PIX_PAID_URL', 'NEXUM_API_CHAT_ID', 'NEXUM_API_CREDENTIAL', 'LOCAL_REVIEW', 'ATLAS_SECRET_KEY', 'ATLAS_NOTIFICATIONS_MODE'];
   const before = Object.fromEntries(keys.map(key => [key, process.env[key]]));
   process.env.NEXUM_WEBHOOK_TOKEN = 'test-webhook-secret'; process.env.PUSHCUT_PIX_PENDING_URL = pendingUrl; process.env.PUSHCUT_PIX_PAID_URL = paidUrl;
   process.env.NEXUM_API_CHAT_ID = '1000000000'; process.env.NEXUM_API_CREDENTIAL = 'test-credential'; delete process.env.LOCAL_REVIEW;
   process.env.ATLAS_SECRET_KEY = 'atlas-test-secret';
-  try { await run(originalFetch); } finally { globalThis.fetch = originalFetch; for (const [key, value] of Object.entries(before)) if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+  delete process.env.ATLAS_NOTIFICATIONS_MODE;
+  try { await run(originalFetch); } finally { claim.mock.restore(); finish.mock.restore(); globalThis.fetch = originalFetch; for (const [key, value] of Object.entries(before)) if (value === undefined) delete process.env[key]; else process.env[key] = value; }
 }
 
 test('webhook exige segredo correto e configura callback HTTPS por cobrança', async () => setup(async () => {
@@ -35,6 +40,24 @@ test('webhook exige segredo correto e configura callback HTTPS por cobrança', a
 const atlasOrder = 'rota-atlas-397-10000000-0000-4000-8000-000000000001';
 function atlasEvent(id, state = 'pending') { return { type: 'transaction.' + state, livemode: true, data: { id, external_id: atlasOrder, status: state } }; }
 function atlasCharge(id, state = 'pending') { return { id, external_id: atlasOrder, amount: 397, status: state, method: 'pix', livemode: true, metadata: { product: 'rota-black-2026' } }; }
+
+test('avisos diretos no painel Atlas impedem o segundo envio por pedidos novos e antigos', async () => setup(async () => {
+  process.env.ATLAS_NOTIFICATIONS_MODE = 'gateway';
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push(url);
+    assert.equal(url, 'https://atlaspags.com/api/v1/charges');
+    assert.equal(options.method, 'POST');
+    const body = JSON.parse(options.body);
+    assert.equal(Object.hasOwn(body, 'postback_url'), false);
+    return Response.json({ ...atlasCharge('direct_panel'), pix: { code: '000201TEST', expires_at: new Date(Date.now() + 1800000).toISOString() } });
+  };
+  const created = await createCharge({ name: 'Pessoa Teste', email: 'aluno@example.com', emailConfirmation: 'aluno@example.com', document: '52998224725', phone: '11999999999', accepted: true, requestId: '10000000-0000-4000-8000-000000000001' });
+  assert.equal(created.amount, 397);
+  assert.deepEqual(await receiveAtlasWebhook(atlasEvent('older_order')), { ok: true, ignored: true });
+  assert.deepEqual(await receiveAtlasWebhook(atlasEvent('older_order', 'paid')), { ok: true, ignored: true });
+  assert.equal(calls.length, 1);
+}));
 
 test('Atlas só notifica depois de consultar e validar o pagamento no servidor', async () => setup(async () => {
   const sent = []; let charge = atlasCharge('atlas_notice');
@@ -94,7 +117,7 @@ test('eventos inválidos, outros pedidos, reembolsos e falhas não disparam vend
 test('concorrência não duplica aviso e falha de entrega permite nova tentativa', async () => setup(async () => {
   let count = 0; globalThis.fetch = async () => { count++; await new Promise(resolve => setTimeout(resolve, 5)); return Response.json({ success: true }); };
   await Promise.all([receiveNexumWebhook(event('parallel')), receiveNexumWebhook(event('parallel'))]); assert.equal(count, 1);
-  globalThis.fetch = async () => new Response('', { status: 503 });
+  globalThis.fetch = async () => new Response('', { status: 429 });
   await assert.rejects(receiveNexumWebhook(event('retry')), error => error.status === 503);
   globalThis.fetch = async () => Response.json({ success: true }); assert.equal((await receiveNexumWebhook(event('retry'))).ok, true);
 }));

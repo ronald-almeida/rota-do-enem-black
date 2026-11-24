@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { notificationStorageAvailable } from '../lib/notification-store.js';
 import { webhookAuthorized, receiveNexumWebhook, atlasWebhookAuthorized } from '../lib/webhooks.js';
 import { paymentAvailable, reviewMode, visualReview, createCharge, getCharge, receiveAtlasWebhook, simulatePayment, CheckoutError, PRICE, PRODUCT, WHATSAPP, REFUND_URL } from '../lib/checkout.js';
 
@@ -45,7 +46,10 @@ export default async function handler(req, res) {
       const pdf = await readFile(new URL('../private/introducao-rota-do-enem.pdf', import.meta.url));
       res.setHeader('Content-Type', 'application/pdf');res.setHeader('Content-Disposition', 'attachment; filename="introducao-rota-do-enem.pdf"');return res.end(pdf);
     }
-    if (route === '/api/config' && req.method === 'GET') return json(200, { available: await paymentAvailable(), review: reviewMode(), price: PRICE, product: PRODUCT, whatsapp: WHATSAPP, refundUrl: REFUND_URL });
+    if (route === '/api/config' && req.method === 'GET') {
+      const [available, notificationsAvailable] = await Promise.all([paymentAvailable(), reviewMode() ? false : notificationStorageAvailable()]);
+      return json(200, { available, notificationsAvailable, review: reviewMode(), price: PRICE, product: PRODUCT, whatsapp: WHATSAPP, refundUrl: REFUND_URL });
+    }
     if (route === '/api/intro' && req.method === 'GET') {
       const token = req.headers.authorization?.replace(/^Bearer /, '');
       const order = await getCharge(token);

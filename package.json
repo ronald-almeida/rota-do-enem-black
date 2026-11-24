@@ -3,11 +3,16 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": "24.x" },
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "dev": "node --env-file-if-exists=.env.local scripts/dev.mjs",
     "dev:review": "node scripts/dev.mjs --review",
     "build": "node scripts/check.mjs",
     "test": "node --test"
+  },
+  "dependencies": {
+    "@vercel/blob": "2.9.0"
   }
 }
