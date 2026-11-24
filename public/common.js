@@ -7,6 +7,7 @@ export async function api(path, body) {
   if (!response.ok) {
     const error = new Error(data.error || 'Não foi possível continuar. Tente novamente.');
     error.reference = data.reference; error.code = data.code; error.retryWithNewAttempt = data.retryWithNewAttempt === true;
+    error.retryAfter = data.retryAfter;
     throw error;
   }
   return data;

@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { configured, reviewMode, visualReview, createCharge, getCharge, simulatePayment, CheckoutError, PRICE, PRODUCT, WHATSAPP, REFUND_URL } from '../lib/checkout.js';
+import { paymentAvailable, reviewMode, visualReview, createCharge, getCharge, simulatePayment, CheckoutError, PRICE, PRODUCT, WHATSAPP, REFUND_URL } from '../lib/checkout.js';
 
 async function readBody(req) {
   if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) return req.body;
@@ -32,7 +32,7 @@ export default async function handler(req, res) {
       const pdf = await readFile(new URL('../private/introducao-rota-do-enem.pdf', import.meta.url));
       res.setHeader('Content-Type', 'application/pdf');res.setHeader('Content-Disposition', 'attachment; filename="introducao-rota-do-enem.pdf"');return res.end(pdf);
     }
-    if (route === '/api/config' && req.method === 'GET') return json(200, { available: configured(), review: reviewMode(), price: PRICE, product: PRODUCT, whatsapp: WHATSAPP, refundUrl: REFUND_URL });
+    if (route === '/api/config' && req.method === 'GET') return json(200, { available: await paymentAvailable(), review: reviewMode(), price: PRICE, product: PRODUCT, whatsapp: WHATSAPP, refundUrl: REFUND_URL });
     if (route === '/api/intro' && req.method === 'GET') {
       const token = req.headers.authorization?.replace(/^Bearer /, '');
       const order = await getCharge(token);
@@ -55,7 +55,7 @@ export default async function handler(req, res) {
   } catch (error) {
     if (!(error instanceof CheckoutError)) console.error('checkout_internal_error', error.name);
     return json(error.status || 500, error instanceof CheckoutError
-      ? { error: error.message, code: error.code, reference: error.reference, retryWithNewAttempt: error.retryWithNewAttempt === true }
+      ? { error: error.message, code: error.code, reference: error.reference, retryAfter: error.retryAfter, retryWithNewAttempt: error.retryWithNewAttempt === true }
       : { error: 'Não foi possível concluir. Tente novamente ou fale com a equipe.' });
   }
 }
