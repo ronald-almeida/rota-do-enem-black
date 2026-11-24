@@ -31,6 +31,8 @@ Site de produção: https://rota-do-enem-black.vercel.app/.
 - `NEXUM_API_ORIGIN`: opcional; padrão `https://nexumpaybot.com`, conforme os exemplos oficiais. Deve ser uma origem aceita pelo gateway.
 - `ORDER_SIGNING_SECRET`: opcional, segredo aleatório separado para a sessão de consulta. Se ausente, usa a credencial do gateway correspondente. Não trocar durante a migração, pois isso invalida sessões existentes.
 - `ATLAS_SECRET_KEY`: manter a chave atual apenas para consultar os pedidos antigos. Nenhuma nova cobrança usa Atlas.
+- `NEXUM_WEBHOOK_TOKEN`: segredo aleatório enviado na criação da cobrança e verificado no header `X-Webhook-Token` dos callbacks.
+- `PUSHCUT_PIX_PENDING_URL` e `PUSHCUT_PIX_PAID_URL`: links secretos das notificações de Pix gerado e venda aprovada. Salvar como Secret em Production; nunca colocar no frontend ou no Git.
 - `/api/config` verifica a autenticação e se a conta aceita depósitos de R$ 247. Sem credenciais válidas, checkout informa indisponibilidade. Nunca gera Pix de demonstração em produção.
 
 Após adicionar/alterar variáveis, é necessário criar novo deployment. A integração segue https://app.nexumpaybot.com/api/index.html (consultada em 24/11/2026). A validação de credenciais usa `GET /api/public/auth/validate`, sem gerar cobrança. Os testes automatizados usam respostas simuladas; não movimentam dinheiro.
@@ -41,7 +43,13 @@ O servidor fixa o preço em 247 reais, valida cadastro e CPF e cria a cobrança 
 
 O pagamento é confirmado consultando `GET /api/public/pix/status/{tx_id}` pelo servidor. A sessão assinada vincula gateway, transação, referência e valor; a resposta deve corresponder ao ID e ao valor e, quando presente, à referência externa. Somente os status de confirmação documentados liberam acesso. O QR Code base64 é exibido como imagem local de dados, junto do código Copia e Cola.
 
-O navegador aguarda pelo menos 30 segundos entre consultas e respeita `Retry-After` em HTTP 429, inclusive após recarregar a página. Resultados assinados válidos por 30 segundos e consultas simultâneas compartilhadas evitam chamadas repetidas no fluxo pagamento → obrigado → PDF. Não há webhook nem execução de efeitos em segundo plano; a Nexum é a fonte do estado. Um resultado HTTP 202/PROCESSING mantém a sessão consultável e permite voltar ao checkout com os mesmos dados e a mesma tentativa para recuperar o código, sem inventar aprovação ou trocar a chave idempotente.
+O navegador aguarda pelo menos 30 segundos entre consultas e respeita `Retry-After` em HTTP 429, inclusive após recarregar a página. Resultados assinados válidos por 30 segundos e consultas simultâneas compartilhadas evitam chamadas repetidas no fluxo pagamento → obrigado → PDF. A Nexum é a fonte do estado. Um resultado HTTP 202/PROCESSING mantém a sessão consultável e permite voltar ao checkout com os mesmos dados e a mesma tentativa para recuperar o código, sem inventar aprovação ou trocar a chave idempotente.
+
+## Notificações Pushcut
+
+Cada nova cobrança registra o callback `https://rota-do-enem-black.vercel.app/api/webhooks/nexum`. O servidor autentica o segredo, confere o ID, a referência do pedido, o valor e o status do evento. `PENDING` aciona o link de Pix gerado; `PAID` com `paid: true` aciona venda aprovada. Falhas, reembolsos e outros pedidos são ignorados. Nenhum dado pessoal é enviado ao Pushcut e os textos configurados no aplicativo são preservados.
+
+As notificações independem de a página permanecer aberta. Uma falha no Pushcut retorna HTTP 503 para permitir as retentativas da Nexum. Eventos repetidos são deduplicados na instância e recebem um ID estável de notificação; sem um banco persistente, não há garantia de entrega exatamente uma vez entre instâncias ou após falhas de rede. O webhook não libera acesso: a página de obrigado e o PDF continuam exigindo consulta autenticada ao gateway.
 
 Sessões Atlas emitidas antes da migração continuam consultando o gateway antigo e validando o valor original de R$ 397. As telas de pagamento e recibo exibem o valor verificado daquele pedido. O checkout de novas compras sempre usa Nexum e R$ 247.
 

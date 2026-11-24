@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { webhookAuthorized, receiveNexumWebhook } from '../lib/webhooks.js';
 import { paymentAvailable, reviewMode, visualReview, createCharge, getCharge, simulatePayment, CheckoutError, PRICE, PRODUCT, WHATSAPP, REFUND_URL } from '../lib/checkout.js';
 
 async function readBody(req) {
@@ -22,6 +23,12 @@ export default async function handler(req, res) {
   const json = (status, body) => { res.statusCode = status; res.setHeader('Content-Type', 'application/json; charset=utf-8'); res.end(JSON.stringify(body)); };
   const route = new URL(req.url, 'http://localhost').pathname;
   try {
+    if (route === '/api/webhooks/nexum') {
+      if (req.method !== 'POST') return json(405, { error: 'Método não permitido.' });
+      if (!webhookAuthorized(req.headers['x-webhook-token'])) throw new CheckoutError('Webhook não autorizado.', 401);
+      if (!String(req.headers['content-type']).includes('application/json')) throw new CheckoutError('Envie os dados em JSON.', 415);
+      return json(200, await receiveNexumWebhook(await readBody(req)));
+    }
     if (route === '/api/review-thanks' && req.method === 'GET') {
       if (!visualReview()) throw new CheckoutError('Página não encontrada.', 404);
       const html = (await readFile(new URL('../public/obrigado.html', import.meta.url), 'utf8')).replace('/thanks.js', '/review-thanks.js');
